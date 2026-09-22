@@ -1,0 +1,73 @@
+{
+  "name": "OPT Deadline Reminder",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "daysInterval": 1,
+              "triggerAtHour": 9
+            }
+          ]
+        }
+      },
+      "name": "Daily 9am Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Reads the student's stored dates and computes days remaining\n// against each deadline. Replace this stub with a real read from wherever\n// you store the user's opt_start / stem_start dates (a small JSON file,\n// SQLite, or the same Chroma metadata store used for the RAG pipeline).\n\nconst optStart = new Date($env.OPT_START_DATE); // e.g. '2026-12-14'\nconst stemStart = $env.STEM_START_DATE ? new Date($env.STEM_START_DATE) : null;\nconst today = new Date();\n\nfunction daysBetween(a, b) {\n  return Math.round((b - a) / (1000 * 60 * 60 * 24));\n}\n\nconst alerts = [];\n\nconst daysSinceOptStart = daysBetween(optStart, today);\nconst unemploymentWarningDay = 60; // warn at 60, hard limit is 90\nconst unemploymentHardLimitDay = 90;\n\nif (daysSinceOptStart >= unemploymentWarningDay && daysSinceOptStart < unemploymentHardLimitDay) {\n  alerts.push(`Warning: you are ${daysSinceOptStart} days into your OPT unemployment window. The 90-day hard limit is approaching.`);\n}\n\nif (stemStart) {\n  const reportPoints = [\n    { months: 6, label: '6-month STEM OPT report' },\n    { months: 12, label: '12-month STEM OPT report + evaluation' },\n    { months: 18, label: '18-month STEM OPT report' },\n    { months: 24, label: '24-month STEM OPT report + final evaluation' },\n  ];\n  for (const point of reportPoints) {\n    const dueDate = new Date(stemStart);\n    dueDate.setMonth(dueDate.getMonth() + point.months);\n    const daysUntilDue = daysBetween(today, dueDate);\n    if (daysUntilDue > 0 && daysUntilDue <= 30) {\n      alerts.push(`Reminder: your ${point.label} is due in ${daysUntilDue} days (${dueDate.toISOString().slice(0,10)}).`);\n    }\n  }\n}\n\nreturn alerts.map(text => ({ json: { alertText: text } }));"
+      },
+      "name": "Compute Deadline Alerts",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{$json.length}}",
+              "operation": "notEqual",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "name": "Any Alerts?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [680, 300],
+      "notes": "Replace this simple length check with a proper IF on item count if needed depending on n8n version."
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{$env.REMINDER_FROM_EMAIL}}",
+        "toEmail": "={{$env.REMINDER_TO_EMAIL}}",
+        "subject": "OPT/STEM Compliance Reminder",
+        "text": "={{$json.alertText}}"
+      },
+      "name": "Send Email Reminder",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [900, 300],
+      "notes": "Configure SMTP credentials in n8n before use. A Slack node can be swapped in the same slot if you'd rather get a Slack DM."
+    }
+  ],
+  "connections": {
+    "Daily 9am Trigger": {
+      "main": [[{ "node": "Compute Deadline Alerts", "type": "main", "index": 0 }]]
+    },
+    "Compute Deadline Alerts": {
+      "main": [[{ "node": "Any Alerts?", "type": "main", "index": 0 }]]
+    },
+    "Any Alerts?": {
+      "main": [[{ "node": "Send Email Reminder", "type": "main", "index": 0 }]]
+    }
+  }
+}
